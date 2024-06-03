@@ -7,6 +7,7 @@
 #include <chrono>
 #include <psapi.h>
 #include <windows.h>
+#include <vector>
 
 __CRT_UUID_DECL(IAudioMeterInformation, 0xC02216F6, 0x8C67, 0x4B5B, 0x9D, 0x00, 0xD0, 0x08, 0xE7, 0x3E, 0x00, 0x64);
 
@@ -119,39 +120,100 @@ int main() {
 							float defaultVolume = 1.0f;
 							if (peakValue != 0)
 							{
-								// LPWSTR string{};
-								// pSessionControl->GetDisplayName(&string);
-								// std::wcout << string << ' ';
-								// std::wcout << "ICON? " << string << ' ';
-								// std::cout << "Peak value: " << peakValue << ' ';
-								// std::cout << "THIS SHIT GOT VOLUME!!!\n";
-								// hr = pSimpleVolume->SetMasterVolume(newVolume, NULL);
-
 								DWORD id{};
 								pSessionControl2->GetProcessId(&id);
-
 								TCHAR szExePath[MAX_PATH];
 								HANDLE hProcess = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, id);
+								std::wcout << szExePath << ' ';
+								std::cout << "Peak value: " << peakValue << ' ';
+								std::cout << "THIS SHIT GOT VOLUME!!!\n";
+								hr = pSimpleVolume->SetMasterVolume(newVolume, NULL);
+
+
 								if (hProcess != NULL) {
 									DWORD dwSize = GetModuleFileNameEx(hProcess, NULL, szExePath, MAX_PATH);
 									if (dwSize > 0) {
-										// std::wcout << L"Executable Name: " << szExePath << std::endl;
 										HICON hIcon = ExtractIcon(nullptr, szExePath, 0);
+										if (hIcon == nullptr) {
+											std::cerr << "Error: ExtractIcon failed." << std::endl;
+											continue;
+										}
+
 										ICONINFO iconInfo;
-										if (!GetIconInfo(hIcon, &iconInfo))
-										{
-											std::cerr << "Getting icon info failed." << std::endl;
+										if (!GetIconInfo(hIcon, &iconInfo)) {
+											std::cerr << "Error: GetIconInfo failed." << std::endl;
+											DestroyIcon(hIcon);
+											continue;
 										}
 
+										// Create a copy of the color bitmap with a DIB section
+										HBITMAP hBitmap = (HBITMAP)CopyImage(iconInfo.hbmColor, IMAGE_BITMAP, 0, 0, LR_CREATEDIBSECTION);
+										if (hBitmap == nullptr) {
+											std::cerr << "Error: CopyImage failed." << std::endl;
+											DestroyIcon(hIcon);
+											continue;
+										}
 
+										// Retrieve the bitmap information
 										BITMAP bmp;
-										if (!GetObject(iconInfo.hbmColor, sizeof(BITMAP), &bmp))
-										{
-											std::cerr << "Getting BMP failed." << std::endl;
+										if (!GetObject(hBitmap, sizeof(BITMAP), &bmp)) {
+											std::cerr << "Error: GetObject failed." << std::endl;
+											DeleteObject(hBitmap);
+											DestroyIcon(hIcon);
+											continue;
 										}
-										// LONG width = bmp.bmWidth;
-										// LONG height = bmp.bmHeight;
-										// std::wcout << "THE ICON FOR " << szExePath << " IS " << width << 'x' << height << '\n';
+
+										if (bmp.bmWidth != 32 || bmp.bmHeight != 32) {
+											std::cerr << "Error: Bitmap dimensions are not 32x32." << std::endl;
+											return false;
+										}
+
+										HDC hdc = CreateCompatibleDC(nullptr);
+										if (hdc == nullptr) {
+											std::cerr << "Error: CreateCompatibleDC failed." << std::endl;
+											continue;
+										}
+
+										// Select the bitmap into the compatible DC
+										HGDIOBJ hOldBitmap = SelectObject(hdc, hBitmap);
+										if (hOldBitmap == nullptr) {
+											std::cerr << "Error: SelectObject failed." << std::endl;
+											DeleteDC(hdc);
+											continue;
+										}
+
+										BYTE pixelArray[32 * 32 * 4];
+
+										BITMAPINFO bmi;
+										ZeroMemory(&bmi, sizeof(BITMAPINFO));
+										bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+										bmi.bmiHeader.biWidth = 32; // Width of the bitmap
+										bmi.bmiHeader.biHeight = -32; // Height of the bitmap (negative to ensure top-down orientation)
+										bmi.bmiHeader.biPlanes = 1;
+										bmi.bmiHeader.biBitCount = 32; // Bits per pixel (ARGB format)
+										bmi.bmiHeader.biCompression = BI_RGB;
+
+										// Retrieve the pixel data from the bitmap
+										if (!GetDIBits(hdc, hBitmap, 0, 32, pixelArray, &bmi, DIB_RGB_COLORS)) {
+											std::cerr << "Error: GetDIBits failed." << std::endl;
+											SelectObject(hdc, hOldBitmap);
+											DeleteDC(hdc);
+											continue;
+										}
+
+										int size = 32 * 32 * 4;
+										int threshold = 128;
+
+										for (int i = 3, count = 0; i < size; i += 4, ++count) { // Start from the alpha channel byte
+											std::cout << (pixelArray[i+2] > threshold ? "1" : "0");
+											if (count % 32 == 31) { // Add a newline after every 32 characters
+												std::cout << std::endl;
+											}
+										}
+
+										// Cleanup resources
+										DeleteObject(hBitmap);
+										DestroyIcon(hIcon);
 									} else {
 										std::cerr << "Error: GetModuleFileNameEx failed" << std::endl;
 									}
