@@ -6,9 +6,10 @@
 - Arduino Uno R3
 - 5pc Logarithmic Sliders
 - 5pc OLED Screens
+- TCA9548A I2C Multiplexer
 
 ### Pins
-
+Multiplexer needed because each screen has same address 0x3C.
 ---
 
 ## Software Requirements
